@@ -36,8 +36,9 @@ jobs:
 
       - name: Restore Android source archive
         run: |
-          test -s source/DhikriAndroid-v2-Source-fixed.zip.b64
-          base64 --decode source/DhikriAndroid-v2-Source-fixed.zip.b64 > /tmp/dhikri-source.zip
+          cat source/part-1.b64 source/part-2.b64 source/part-3.b64 source/part-4.b64 > /tmp/dhikri-source.zip.b64
+          base64 --decode /tmp/dhikri-source.zip.b64 > /tmp/dhikri-source.zip
+          unzip -tq /tmp/dhikri-source.zip
           unzip -q /tmp/dhikri-source.zip -d .
           test -f DhikriAndroid/app/build.gradle.kts
           grep -F 'Regex("""([01]\\d|2[0-3]):[0-5]\\d""")' DhikriAndroid/app/src/main/java/com/medhat/dhikri/MainActivity.kt
