@@ -45,7 +45,7 @@ jobs:
           unzip -tq /tmp/dhikri-source.zip
           unzip -q /tmp/dhikri-source.zip -d .
           test -f DhikriAndroid/app/build.gradle.kts
-          grep -F 'Regex("""([01]\\d|2[0-3]):[0-5]\\d""")' DhikriAndroid/app/src/main/java/com/medhat/dhikri/MainActivity.kt
+          grep -F 'Regex("""([01]\d|2[0-3]):[0-5]\d""")' DhikriAndroid/app/src/main/java/com/medhat/dhikri/MainActivity.kt
 
       - name: Build debug APK
         shell: bash
