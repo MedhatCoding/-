@@ -551,8 +551,8 @@ jobs:
                       }
                   }
                   session?.setMetadata(android.media.MediaMetadata.Builder()
-                      .putString(android.media.MediaMetadata.METADATA_TITLE, currentTitle)
-                      .putString(android.media.MediaMetadata.METADATA_ARTIST, "ذِكري")
+                      .putString(android.media.MediaMetadata.METADATA_KEY_TITLE, currentTitle)
+                      .putString(android.media.MediaMetadata.METADATA_KEY_ARTIST, "ذِكري")
                       .build())
               }
 
