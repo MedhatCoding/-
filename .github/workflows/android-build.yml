@@ -45,6 +45,25 @@ jobs:
           unzip -tq /tmp/dhikri-source.zip
           unzip -q /tmp/dhikri-source.zip -d .
           test -f DhikriAndroid/app/build.gradle.kts
+      - name: Align Java and Kotlin JVM targets
+        shell: bash
+        run: |
+          cat >> DhikriAndroid/app/build.gradle.kts <<'EOF'
+
+          android {
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+          }
+
+          tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          }
+          EOF
+
       - name: Build debug APK
         shell: bash
         run: |
