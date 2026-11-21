@@ -40,7 +40,7 @@ jobs:
       - name: Restore Android source archive
         shell: bash
         run: |
-          cat source/part-1.b64 source/part-2.b64 source/part-3.b64 source/part-4.b64 > /tmp/dhikri-source.zip.b64
+          cat source/part-1.b64 source/part-2.b64 source/part-3.b64 source/part-4a.b64 source/part-4b.b64 source/part-4c.b64 source/part-4d.b64 > /tmp/dhikri-source.zip.b64
           base64 --decode /tmp/dhikri-source.zip.b64 > /tmp/dhikri-source.zip
           unzip -tq /tmp/dhikri-source.zip
           unzip -q /tmp/dhikri-source.zip -d .
