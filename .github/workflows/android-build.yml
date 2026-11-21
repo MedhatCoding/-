@@ -45,6 +45,34 @@ jobs:
           unzip -tq /tmp/dhikri-source.zip
           unzip -q /tmp/dhikri-source.zip -d .
           test -f DhikriAndroid/app/build.gradle.kts
+      - name: Install complete Dhikri logo
+        shell: bash
+        run: |
+          python3 -m pip install --quiet pillow
+          curl -fL --retry 3 'https://raw.githubusercontent.com/MedhatCoding/-/main/assets/branding/dhikri-logo.png' -o /tmp/dhikri-logo.png
+          python3 - <<'PY'
+          from PIL import Image
+          from pathlib import Path
+          import re
+          root = Path('DhikriAndroid/app/src/main')
+          manifest = root / 'AndroidManifest.xml'
+          text = manifest.read_text(encoding='utf-8')
+          image = Image.open('/tmp/dhikri-logo.png').convert('RGBA')
+          if image.width < 64 or image.height < 64:
+              raise SystemExit(f'Logo image is unexpectedly small: {image.size}')
+          sizes = {'mipmap-mdpi':48, 'mipmap-hdpi':72, 'mipmap-xhdpi':96, 'mipmap-xxhdpi':144, 'mipmap-xxxhdpi':192}
+          for folder, size in sizes.items():
+              target = root / 'res' / folder
+              target.mkdir(parents=True, exist_ok=True)
+              image.resize((size, size), Image.Resampling.LANCZOS).save(target / 'dhikri_logo.png', optimize=True)
+          text, count = re.subn(r'android:icon="@[^" ]+"', 'android:icon="@mipmap/dhikri_logo"', text, count=1)
+          if count != 1:
+              raise SystemExit('Could not locate android:icon in AndroidManifest.xml')
+          text = re.sub(r'\s+android:roundIcon="@[^" ]+"', '', text)
+          manifest.write_text(text, encoding='utf-8')
+          print(f'Installed complete logo image {image.size}; generated all launcher densities.')
+          PY
+
       - name: Add notification playback controls
         shell: bash
         run: |
@@ -163,7 +191,7 @@ jobs:
                       .setOnlyAlertOnce(true)
                       .setOngoing(true)
                       .addAction(Notification.Action.Builder(toggleIcon, toggleLabel, toggleIntent).build())
-                      .addAction(Notification.Action.Builder(android.R.drawable.ic_media_stop, "إيقاف", stopIntent).build())
+                      .addAction(Notification.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel, "إيقاف", stopIntent).build())
                       .build()
               }
 
