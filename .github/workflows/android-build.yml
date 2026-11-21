@@ -471,7 +471,7 @@ jobs:
           print(f'Installed complete logo image {image.size}; generated all launcher densities.')
           PY
 
-      - name: Add notification playback controls
+      - name: Add real media-session notification controls
         shell: bash
         run: |
           cat > DhikriAndroid/app/src/main/java/com/medhat/dhikri/AudioReminderService.kt <<'EOF'
@@ -481,13 +481,16 @@ jobs:
           import android.content.Intent
           import android.media.AudioAttributes
           import android.media.MediaPlayer
+          import android.media.session.MediaSession
+          import android.media.session.PlaybackState
           import android.net.Uri
           import android.os.Build
           import android.os.IBinder
 
           class AudioReminderService : Service() {
               private var player: MediaPlayer? = null
-              private var isPaused = false
+              private var session: MediaSession? = null
+              private var paused = false
               private var currentTitle = "ذِكري"
 
               override fun onBind(intent: Intent?): IBinder? = null
@@ -498,14 +501,16 @@ jobs:
                   when (intent?.action) {
                       ACTION_PAUSE -> {
                           if (player?.isPlaying == true) player?.pause()
-                          isPaused = true
+                          paused = true
+                          updatePlaybackState(false)
                           startForeground(NOTIFICATION_ID, buildNotification(false))
                           return START_NOT_STICKY
                       }
                       ACTION_RESUME -> {
-                          if (player != null && isPaused) {
+                          if (player != null && paused) {
                               player?.start()
-                              isPaused = false
+                              paused = false
+                              updatePlaybackState(true)
                               startForeground(NOTIFICATION_ID, buildNotification(true))
                           }
                           return START_NOT_STICKY
@@ -515,55 +520,91 @@ jobs:
                           return START_NOT_STICKY
                       }
                   }
+
                   startForeground(NOTIFICATION_ID, buildNotification(true))
                   if (intent?.getBooleanExtra("missing_audio", false) == true) {
-                      stopForeground(STOP_FOREGROUND_REMOVE)
-                      stopSelf(startId)
+                      stopForeground(STOP_FOREGROUND_REMOVE); stopSelf(startId)
                       return START_NOT_STICKY
                   }
                   val uriText = intent?.getStringExtra("audio_uri") ?: run {
-                      stopForeground(STOP_FOREGROUND_REMOVE)
-                      stopSelf(startId)
+                      stopForeground(STOP_FOREGROUND_REMOVE); stopSelf(startId)
                       return START_NOT_STICKY
                   }
                   try {
                       player?.release()
-                      isPaused = false
+                      paused = false
                       player = MediaPlayer().apply {
                           setAudioAttributes(AudioAttributes.Builder()
-                              .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                              .setUsage(AudioAttributes.USAGE_MEDIA)
                               .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
                           setDataSource(this@AudioReminderService, Uri.parse(uriText))
-                          setOnCompletionListener {
-                              stopForeground(STOP_FOREGROUND_REMOVE)
-                              player?.release()
-                              player = null
-                              stopSelf()
-                          }
+                          setOnCompletionListener { stopPlayback() }
                           setOnErrorListener { _, _, _ -> stopPlayback(); true }
                           prepare()
                           start()
                       }
+                      ensureMediaSession()
+                      updatePlaybackState(true)
+                      getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(true))
                   } catch (_: Exception) { stopPlayback() }
                   return START_NOT_STICKY
               }
 
+              private fun ensureMediaSession() {
+                  if (session == null) {
+                      session = MediaSession(this, "DhikriPlayback").apply {
+                          setCallback(object : MediaSession.Callback() {
+                              override fun onPlay() { handleAction(ACTION_RESUME) }
+                              override fun onPause() { handleAction(ACTION_PAUSE) }
+                              override fun onStop() { handleAction(ACTION_STOP) }
+                          })
+                          isActive = true
+                      }
+                  }
+                  session?.setMetadata(android.media.MediaMetadata.Builder()
+                      .putString(android.media.MediaMetadata.METADATA_TITLE, currentTitle)
+                      .putString(android.media.MediaMetadata.METADATA_ARTIST, "ذِكري")
+                      .build())
+              }
+
+              private fun handleAction(action: String) {
+                  val intent = Intent(this, AudioReminderService::class.java).setAction(action)
+                  if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent) else startService(intent)
+              }
+
+              private fun updatePlaybackState(playing: Boolean) {
+                  ensureMediaSession()
+                  val actions = PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or
+                      PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_STOP
+                  val state = if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED
+                  session?.setPlaybackState(PlaybackState.Builder()
+                      .setActions(actions).setState(state, if (playing) 0L else 0L, if (playing) 1f else 0f)
+                      .build())
+              }
+
               private fun buildNotification(playing: Boolean): Notification {
-                  val action = if (playing) ACTION_PAUSE else ACTION_RESUME
-                  val label = if (playing) "إيقاف مؤقت" else "استئناف"
-                  val icon = if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
+                  ensureMediaSession()
+                  val toggleAction = if (playing) ACTION_PAUSE else ACTION_RESUME
+                  val toggleLabel = if (playing) "إيقاف مؤقت" else "استئناف"
+                  val toggleIcon = if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
                   val toggle = PendingIntent.getService(this, 9010,
-                      Intent(this, AudioReminderService::class.java).setAction(action).putExtra("title", currentTitle),
-                      pendingFlags())
+                      Intent(this, AudioReminderService::class.java).setAction(toggleAction), pendingFlags())
                   val stop = PendingIntent.getService(this, 9011,
                       Intent(this, AudioReminderService::class.java).setAction(ACTION_STOP), pendingFlags())
-                  return Notification.Builder(this, CHANNEL_ID)
+                  val builder = Notification.Builder(this, CHANNEL_ID)
                       .setContentTitle("ذِكري").setContentText(currentTitle)
                       .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-                      .setCategory(Notification.CATEGORY_TRANSPORT).setOnlyAlertOnce(true).setOngoing(true)
-                      .addAction(Notification.Action.Builder(icon, label, toggle).build())
-                      .addAction(Notification.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel, "إيقاف", stop).build())
-                      .build()
+                      .setCategory(Notification.CATEGORY_TRANSPORT)
+                      .setVisibility(Notification.VISIBILITY_PUBLIC)
+                      .setOnlyAlertOnce(true).setOngoing(true)
+                      .addAction(toggleIcon, toggleLabel, toggle)
+                      .addAction(android.R.drawable.ic_menu_close_clear_cancel, "إيقاف", stop)
+                  if (Build.VERSION.SDK_INT >= 21) {
+                      builder.setStyle(Notification.MediaStyle()
+                          .setMediaSession(session?.sessionToken)
+                          .setShowActionsInCompactView(0, 1))
+                  }
+                  return builder.build()
               }
 
               private fun pendingFlags() = PendingIntent.FLAG_UPDATE_CURRENT or
@@ -571,9 +612,10 @@ jobs:
 
               private fun stopPlayback() {
                   try { player?.stop() } catch (_: Exception) {}
-                  player?.release()
-                  player = null
-                  isPaused = false
+                  player?.release(); player = null; paused = false
+                  session?.setPlaybackState(PlaybackState.Builder()
+                      .setActions(PlaybackState.ACTION_PLAY).setState(PlaybackState.STATE_STOPPED, 0L, 0f).build())
+                  session?.isActive = false
                   stopForeground(STOP_FOREGROUND_REMOVE)
                   stopSelf()
               }
@@ -582,16 +624,16 @@ jobs:
                   if (Build.VERSION.SDK_INT >= 26) {
                       val manager = getSystemService(NotificationManager::class.java)
                       if (manager.getNotificationChannel(CHANNEL_ID) == null) {
-                          val channel = NotificationChannel(CHANNEL_ID, "تذكيرات ذِكري", NotificationManager.IMPORTANCE_HIGH)
-                          channel.description = "إشعارات التذكير بالأذكار والتحكم في الصوت)"
+                          val channel = NotificationChannel(CHANNEL_ID, "تذكيرات ذِكري", NotificationManager.IMPORTANCE_LOW)
+                          channel.description = "تشغيل الأذكار والتحكم بها من ستارة الإشعارات"
                           manager.createNotificationChannel(channel)
                       }
                   }
               }
 
               override fun onDestroy() {
-                  player?.release()
-                  player = null
+                  player?.release(); player = null
+                  session?.release(); session = null
                   super.onDestroy()
               }
 
