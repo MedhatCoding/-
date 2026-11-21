@@ -45,6 +45,11 @@ jobs:
           unzip -tq /tmp/dhikri-source.zip
           unzip -q /tmp/dhikri-source.zip -d .
           test -f DhikriAndroid/app/build.gradle.kts
+      - name: Inspect reminder source (temporary)
+        shell: bash
+        run: |
+          find DhikriAndroid/app/src -type f -name '*.kt' -print -exec sed -n '1,260p' {} \;
+
       - name: Align Java and Kotlin JVM targets
         shell: bash
         run: |
