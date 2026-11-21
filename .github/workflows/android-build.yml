@@ -249,20 +249,15 @@ jobs:
         shell: bash
         run: |
           python3 - <<'PY'
+          import re
           from pathlib import Path
-          p = Path('DhikriAndroid/app/src/main/java/com/medhat/dhikri/MainActivity.kt')
+          root = Path('DhikriAndroid/app/src/main/java/com/medhat/dhikri')
+          p = root / 'MainActivity.kt'
           s = p.read_text()
-          s = s.replace('''    private lateinit var intervalInput: EditText
-                  private lateinit var intervalDhikr: Spinner''','''    private lateinit var intervalRows: LinearLayout''')
-          s = s.replace('''        intervalInput = EditText(this).apply {
-                      hint = "الفاصل بالدقائق (مثلاً 30)"
-                      inputType = android.text.InputType.TYPE_CLASS_NUMBER
-                      textSize = 17f; setText(prefs.getInt("interval_minutes", 30).toString())
-                  }
-                  page.addView(intervalInput, matchWrap())
-                  page.addView(label("الذكر الذي سيتم تشغيله في كل تذكير دوري"))
-                  intervalDhikr = makeDhikrSpinner(prefs.getString("interval_dhikr", "salawat") ?: "salawat")
-                  page.addView(intervalDhikr, matchWrap())''','''        intervalRows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+          s, n = re.subn(r'private lateinit var intervalInput: EditText\s+private lateinit var intervalDhikr: Spinner',
+              'private lateinit var intervalRows: LinearLayout', s, count=1)
+          if n != 1: raise SystemExit('Could not replace single-interval UI fields')
+          ui = '''        intervalRows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
                   page.addView(intervalRows, matchWrap())
                   val savedIntervals = prefs.getString("interval_schedules", null)
                   if (!savedIntervals.isNullOrBlank()) {
@@ -277,10 +272,35 @@ jobs:
                   page.addView(Button(this).apply {
                       text = "+ إضافة تذكير دوري"
                       setOnClickListener { addIntervalRow("30", "salawat") }
-                  }, matchWrap())''')
-          s = s.replace('''        page.addView(label("ملاحظة: قد تحتاج بعض الهواتف إلى السماح بالتشغيل التلقائي واستثناء التطبيق من تحسين البطارية لضمان وصول التذكيرات في موعدها."))''','''        page.addView(label("ملاحظة: قد تحتاج بعض الهواتف إلى السماح بالتشغيل التلقائي واستثناء التطبيق من تحسين البطارية لضمان وصول التذكيرات في موعدها."))
-                  applyVisualTheme(page)''')
-          s = s.replace('''    private fun addScheduleRow(time: String, dhikrId: String) {''','''    private fun addIntervalRow(minutes: String, dhikrId: String) {
+                  }, matchWrap())'''
+          s, n = re.subn(r'        intervalInput = EditText\(this\)\.apply \{.*?page\.addView\(intervalDhikr, matchWrap\(\)\)',
+              lambda m: ui, s, count=1, flags=re.S)
+          if n != 1: raise SystemExit('Could not replace old periodic reminder controls')
+          validation = '''        val intervalSchedules = mutableListOf<String>()
+                  for (i in 0 until intervalRows.childCount) {
+                      val row = intervalRows.getChildAt(i) as LinearLayout
+                      val input = row.getChildAt(0) as EditText
+                      val minutes = input.text.toString().toIntOrNull()
+                      if (minutes == null || minutes !in 1..1440) {
+                          input.error = "أدخل مدة من 1 إلى 1440 دقيقة"; return
+                      }
+                      val spinner = row.getChildAt(1) as Spinner
+                      intervalSchedules.add("$minutes|\${spinnerDhikrId(spinner)}")
+                  }
+                  if (intervalSwitch.isChecked && intervalSchedules.isEmpty()) {
+                      Toast.makeText(this, "أضف تذكيرًا دوريًا واحدًا على الأقل", Toast.LENGTH_SHORT).show(); return
+                  }
+                  val schedules = mutableListOf<String>()'''
+          s, n = re.subn(r'        val minutes = intervalInput\.text\.toString\(\)\.toIntOrNull\(\).*?        val schedules = mutableListOf<String>\(\)',
+              lambda m: validation, s, count=1, flags=re.S)
+          if n != 1: raise SystemExit('Could not replace periodic validation and serialization')
+          s = s.replace('''.putInt("interval_minutes", minutes ?: 30)
+                      .putString("interval_dhikr", spinnerDhikrId(intervalDhikr))''',
+              '''.putInt("interval_minutes", intervalSchedules.firstOrNull()?.substringBefore("|")?.toIntOrNull() ?: 30)
+                      .putString("interval_dhikr", intervalSchedules.firstOrNull()?.substringAfter("|") ?: "salawat")
+                      .putString("interval_schedules", intervalSchedules.joinToString(";"))''', 1)
+          if 'putString("interval_schedules"' not in s: raise SystemExit('Could not save periodic reminder list')
+          methods = '''    private fun addIntervalRow(minutes: String, dhikrId: String) {
                   val row = LinearLayout(this).apply {
                       orientation = LinearLayout.HORIZONTAL
                       gravity = Gravity.CENTER_VERTICAL
@@ -317,13 +337,13 @@ jobs:
                                   child.typeface = android.graphics.Typeface.DEFAULT_BOLD
                                   child.setPadding(16, 10, 16, 10)
                               }
-                              is TextView -> if (child !is EditText) {
-                                  child.setTextColor(ink)
-                                  child.setPadding(child.paddingLeft, maxOf(child.paddingTop, 8), child.paddingRight, maxOf(child.paddingBottom, 8))
-                              }
                               is EditText -> {
                                   child.textSize = 17f
                                   child.setPadding(14, 12, 14, 12)
+                              }
+                              is TextView -> {
+                                  child.setTextColor(ink)
+                                  child.setPadding(child.paddingLeft, maxOf(child.paddingTop, 8), child.paddingRight, maxOf(child.paddingBottom, 8))
                               }
                           }
                           if (child is android.view.ViewGroup) visit(child)
@@ -332,50 +352,20 @@ jobs:
                   visit(root)
               }
 
-              private fun addScheduleRow(time: String, dhikrId: String) {''')
-          old = '''        val minutes = intervalInput.text.toString().toIntOrNull()
-                  if (intervalSwitch.isChecked && (minutes == null || minutes !in 1..1440)) {
-                      intervalInput.error = "أدخل عدد دقائق من 1 إلى 1440"; return
-                  }
-                  val schedules = mutableListOf<String>()'''
-          new = '''        val intervalSchedules = mutableListOf<String>()
-                  for (i in 0 until intervalRows.childCount) {
-                      val row = intervalRows.getChildAt(i) as LinearLayout
-                      val input = row.getChildAt(0) as EditText
-                      val minutes = input.text.toString().toIntOrNull()
-                      if (minutes == null || minutes !in 1..1440) {
-                          input.error = "أدخل مدة من 1 إلى 1440 دقيقة"; return
-                      }
-                      val spinner = row.getChildAt(1) as Spinner
-                      intervalSchedules.add("$minutes|${spinnerDhikrId(spinner)}")
-                  }
-                  if (intervalSwitch.isChecked && intervalSchedules.isEmpty()) {
-                      Toast.makeText(this, "أضف تذكيرًا دوريًا واحدًا على الأقل", Toast.LENGTH_SHORT).show(); return
-                  }
-                  val schedules = mutableListOf<String>()'''
-          if old not in s: raise SystemExit('Could not locate old interval validation block')
-          s = s.replace(old, new, 1)
-          s = s.replace('''.putInt("interval_minutes", minutes ?: 30)
-                      .putString("interval_dhikr", spinnerDhikrId(intervalDhikr))''','''.putInt("interval_minutes", intervalSchedules.firstOrNull()?.substringBefore("|")?.toIntOrNull() ?: 30)
-                      .putString("interval_dhikr", intervalSchedules.firstOrNull()?.substringAfter("|") ?: "salawat")
-                      .putString("interval_schedules", intervalSchedules.joinToString(";"))''')
-          s = s.replace('''        status.append("\\nالدوري: " + if (interval) "كل ${prefs.getInt("interval_minutes", 30)} دقيقة" else "متوقف")''','''        val count = (prefs.getString("interval_schedules", "") ?: "").split(";").count { it.contains("|") }
-                  status.append("\\nالتذكيرات الدورية: " + if (interval) "$count تذكير/تذكيرات مفعّلة" else "متوقفة")''')
+          '''
+          if 'private fun addIntervalRow' not in s:
+              s = s.replace('    private fun addScheduleRow(time: String, dhikrId: String) {', methods + '    private fun addScheduleRow(time: String, dhikrId: String) {', 1)
+          s = s.replace('''        page.addView(label("ملاحظة: قد تحتاج بعض الهواتف إلى السماح بالتشغيل التلقائي واستثناء التطبيق من تحسين البطارية لضمان وصول التذكيرات في موعدها."))''',
+              '''        page.addView(label("ملاحظة: قد تحتاج بعض الهواتف إلى السماح بالتشغيل التلقائي واستثناء التطبيق من تحسين البطارية لضمان وصول التذكيرات في موعدها."))
+                  applyVisualTheme(page)''', 1)
           p.write_text(s)
 
-          p = Path('DhikriAndroid/app/src/main/java/com/medhat/dhikri/ReminderScheduler.kt')
+          p = root / 'ReminderScheduler.kt'
           s = p.read_text()
-          s = s.replace('''    private const val INTERVAL_ID = 7101
-              private const val DAILY_BASE = 7200''','''    private const val INTERVAL_BASE = 7101
-              private const val INTERVAL_LAST = 7199
-              private const val DAILY_BASE = 7200''')
-          old = '''        if (prefs.getBoolean("interval_on", false)) {
-                      val minutes = prefs.getInt("interval_minutes", 30).coerceIn(1, 1440)
-                      val dhikrId = prefs.getString("interval_dhikr", "salawat") ?: "salawat"
-                      val next = System.currentTimeMillis() + minutes * 60_000L
-                      if (!SleepModeManager.isSleeping(context, next)) schedule(context, am, INTERVAL_ID, next, dhikrId)
-                  }'''
-          new = '''        if (prefs.getBoolean("interval_on", false)) {
+          s, n = re.subn(r'private const val INTERVAL_ID = 7101\s+private const val DAILY_BASE = 7200',
+              'private const val INTERVAL_BASE = 7101\n    private const val INTERVAL_LAST = 7199\n    private const val DAILY_BASE = 7200', s, count=1)
+          if n != 1: raise SystemExit('Could not expand interval alarm ID range')
+          block = '''        if (prefs.getBoolean("interval_on", false)) {
                       val saved = prefs.getString("interval_schedules", "") ?: ""
                       val entries = if (saved.isBlank()) listOf(
                           "${prefs.getInt("interval_minutes", 30)}|${prefs.getString("interval_dhikr", "salawat") ?: "salawat"}"
@@ -389,16 +379,11 @@ jobs:
                               schedule(context, am, INTERVAL_BASE + index, next, parts[1])
                       }
                   }'''
-          if old not in s: raise SystemExit('Could not locate scheduler interval block')
-          s = s.replace(old, new, 1)
-          old = '''        val prefs = context.getSharedPreferences("dhikri", Context.MODE_PRIVATE)
-                  if (!prefs.getBoolean("interval_on", false) || SleepModeManager.isSleeping(context)) return
-                  val minutes = prefs.getInt("interval_minutes", 30).coerceIn(1, 1440)
-                  val dhikrId = prefs.getString("interval_dhikr", "salawat") ?: "salawat"
-                  val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-                  val next = System.currentTimeMillis() + minutes * 60_000L
-                  if (!SleepModeManager.isSleeping(context, next)) schedule(context, am, INTERVAL_ID, next, dhikrId)'''
-          new = '''        val prefs = context.getSharedPreferences("dhikri", Context.MODE_PRIVATE)
+          s, n = re.subn(r'        if \(prefs\.getBoolean\("interval_on", false\)\) \{.*?\n        \}\n\n        if \(prefs\.getBoolean\("daily_on", false\)\)',
+              lambda m: block + '\n\n        if (prefs.getBoolean("daily_on", false))', s, count=1, flags=re.S)
+          if n != 1: raise SystemExit('Could not replace scheduler interval block')
+          fn = '''    fun scheduleNextInterval(context: Context, requestId: Int) {
+                  val prefs = context.getSharedPreferences("dhikri", Context.MODE_PRIVATE)
                   if (!prefs.getBoolean("interval_on", false) || SleepModeManager.isSleeping(context)) return
                   val index = requestId - INTERVAL_BASE
                   if (index !in 0..(INTERVAL_LAST - INTERVAL_BASE)) return
@@ -411,18 +396,22 @@ jobs:
                   val minutes = parts[0].toIntOrNull()?.coerceIn(1, 1440) ?: return
                   val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
                   val next = System.currentTimeMillis() + minutes * 60_000L
-                  if (!SleepModeManager.isSleeping(context, next)) schedule(context, am, requestId, next, parts[1])'''
-          if old not in s: raise SystemExit('Could not locate next interval function')
-          s = s.replace(old, new, 1)
-          s = s.replace('''(listOf(INTERVAL_ID, 7102) + (DAILY_BASE..DAILY_BASE + 99).toList())''','''((INTERVAL_BASE..INTERVAL_LAST).toList() + 7102 + (DAILY_BASE..DAILY_BASE + 99).toList())''')
+                  if (!SleepModeManager.isSleeping(context, next)) schedule(context, am, requestId, next, parts[1])
+              }'''
+          s, n = re.subn(r'    fun scheduleNextInterval\(context: Context\) \{.*?\n    \}', lambda m: fn, s, count=1, flags=re.S)
+          if n != 1: raise SystemExit('Could not replace interval rescheduling function')
+          s = s.replace('(listOf(INTERVAL_ID, 7102) + (DAILY_BASE..DAILY_BASE + 99).toList())',
+              '((INTERVAL_BASE..INTERVAL_LAST).toList() + 7102 + (DAILY_BASE..DAILY_BASE + 99).toList())')
+          if 'INTERVAL_ID' in s: raise SystemExit('Old single interval ID remains in scheduler')
           p.write_text(s)
 
-          p = Path('DhikriAndroid/app/src/main/java/com/medhat/dhikri/ReminderReceiver.kt')
-          s = p.read_text().replace('''        if (requestId == 7101) ReminderScheduler.scheduleNextInterval(context)
-                  else if (requestId >= 7200)''','''        if (requestId in 7101..7199) ReminderScheduler.scheduleNextInterval(context, requestId)
-                  else if (requestId >= 7200)''')
+          p = root / 'ReminderReceiver.kt'
+          s = p.read_text()
+          s, n = re.subn(r'if \(requestId == 7101\) ReminderScheduler\.scheduleNextInterval\(context\)\s+else if \(requestId >= 7200\)',
+              'if (requestId in 7101..7199) ReminderScheduler.scheduleNextInterval(context, requestId)\n        else if (requestId >= 7200)', s, count=1)
+          if n != 1: raise SystemExit('Could not route periodic reminder alarms')
           p.write_text(s)
-          print("Multiple periodic reminders and refreshed visual styling applied.")
+          print("Independent periodic reminders and UI styling patch applied.")
           PY
 
       - name: Inspect source and scheduling implementation
