@@ -47,6 +47,21 @@ jobs:
           unzip -q /tmp/dhikri-source.zip -d .
           test -f DhikriAndroid/app/build.gradle.kts
 
+      - name: Inspect source and scheduling implementation
+        shell: bash
+        run: |
+          echo '===== Kotlin / Java source files ====='
+          find DhikriAndroid/app/src/main -type f \( -name '*.kt' -o -name '*.java' \) -print
+          echo '===== Scheduling and activity source ====='
+          while IFS= read -r file; do
+            echo "===== $file ====="
+            sed -n '1,320p' "$file"
+          done < <(find DhikriAndroid/app/src/main -type f \( -name '*.kt' -o -name '*.java' \) -print)
+          echo '===== Manifest ====='
+          cat DhikriAndroid/app/src/main/AndroidManifest.xml
+          echo '===== Gradle ====='
+          cat DhikriAndroid/app/build.gradle.kts
+
       - name: Install complete Dhikri logo
         shell: bash
         run: |
@@ -77,21 +92,6 @@ jobs:
           manifest.write_text(text, encoding='utf-8')
           print(f'Installed complete logo image {image.size}; generated all launcher densities.')
           PY
-
-      - name: Inspect source and scheduling implementation
-        shell: bash
-        run: |
-          echo '===== Kotlin / Java source files ====='
-          find DhikriAndroid/app/src/main -type f \\( -name '*.kt' -o -name '*.java' \\) -print
-          echo '===== Scheduling and activity source ====='
-          while IFS= read -r file; do
-            echo "===== $file ====="
-            sed -n '1,280p' "$file"
-          done < <(find DhikriAndroid/app/src/main -type f \\( -name '*.kt' -o -name '*.java' \\) -print)
-          echo '===== Manifest ====='
-          cat DhikriAndroid/app/src/main/AndroidManifest.xml
-          echo '===== Gradle ====='
-          cat DhikriAndroid/app/build.gradle.kts
 
       - name: Add notification playback controls
         shell: bash
