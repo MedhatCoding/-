@@ -226,6 +226,16 @@ jobs:
               }
 
               private fun playDhikr(id: String) {''')
+          s = s.replace('''        if (dailySwitch.isChecked && schedules.isEmpty()) {''','''        if (sleepSwitch.isChecked && sleepStartValue == sleepEndValue) {
+                      Toast.makeText(this, "وقت النوم ووقت الاستيقاظ لازم يكونوا مختلفين", Toast.LENGTH_LONG).show()
+                      return
+                  }
+                  if (dailySwitch.isChecked && schedules.isEmpty()) {''')
+          s = s.replace('''    private fun playDhikr(id: String) {''','''    private fun playDhikr(id: String) {
+                      if (SleepModeManager.isSleeping(this)) {
+                          Toast.makeText(this, "وضع النوم مفعّل؛ سيتم استئناف التذكيرات في وقت الاستيقاظ", Toast.LENGTH_LONG).show()
+                          return
+                      }''')
           if 'chooseSleepTime' not in s or 'sleep_enabled' not in s:
               raise SystemExit('Sleep settings UI patch did not apply')
           p.write_text(s)
