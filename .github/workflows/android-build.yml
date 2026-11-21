@@ -347,7 +347,7 @@ jobs:
                           input.error = "أدخل مدة من 1 إلى 1440 دقيقة"; return
                       }
                       val spinner = row.getChildAt(1) as Spinner
-                      intervalSchedules.add("$minutes|\${spinnerDhikrId(spinner)}")
+                      intervalSchedules.add("$minutes|${spinnerDhikrId(spinner)}")
                   }
                   if (intervalSwitch.isChecked && intervalSchedules.isEmpty()) {
                       Toast.makeText(this, "أضف تذكيرًا دوريًا واحدًا على الأقل", Toast.LENGTH_SHORT).show(); return
