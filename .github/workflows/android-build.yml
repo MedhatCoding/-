@@ -47,6 +47,191 @@ jobs:
           unzip -q /tmp/dhikri-source.zip -d .
           test -f DhikriAndroid/app/build.gradle.kts
 
+      - name: Implement configurable sleep schedule
+        shell: bash
+        run: |
+          cat > DhikriAndroid/app/src/main/java/com/medhat/dhikri/SleepModeManager.kt <<'EOF'
+          package com.medhat.dhikri
+
+          import android.content.Context
+          import java.util.Calendar
+
+          object SleepModeManager {
+              private const val PREFS = "dhikri"
+              private const val ENABLED = "sleep_enabled"
+              private const val START = "sleep_start"
+              private const val END = "sleep_end"
+
+              fun enabled(context: Context): Boolean =
+                  context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(ENABLED, false)
+
+              fun start(context: Context): String =
+                  context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(START, "23:00") ?: "23:00"
+
+              fun end(context: Context): String =
+                  context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(END, "07:00") ?: "07:00"
+
+              fun isSleeping(context: Context, atMillis: Long = System.currentTimeMillis()): Boolean {
+                  if (!enabled(context)) return false
+                  val from = minutes(start(context)) ?: return false
+                  val until = minutes(end(context)) ?: return false
+                  if (from == until) return false
+                  val cal = Calendar.getInstance().apply { timeInMillis = atMillis }
+                  val now = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
+                  return if (from < until) now >= from && now < until
+                  else now >= from || now < until
+              }
+
+              fun nextBoundary(context: Context, nowMillis: Long = System.currentTimeMillis()): Long? {
+                  if (!enabled(context)) return null
+                  val target = if (isSleeping(context, nowMillis)) end(context) else start(context)
+                  val parts = target.split(":")
+                  val hour = parts.getOrNull(0)?.toIntOrNull() ?: return null
+                  val minute = parts.getOrNull(1)?.toIntOrNull() ?: return null
+                  return Calendar.getInstance().apply {
+                      timeInMillis = nowMillis
+                      set(Calendar.HOUR_OF_DAY, hour)
+                      set(Calendar.MINUTE, minute)
+                      set(Calendar.SECOND, 0)
+                      set(Calendar.MILLISECOND, 0)
+                      if (timeInMillis <= nowMillis) add(Calendar.DAY_OF_YEAR, 1)
+                  }.timeInMillis
+              }
+
+              private fun minutes(value: String): Int? {
+                  val p = value.split(":")
+                  if (p.size != 2) return null
+                  val h = p[0].toIntOrNull() ?: return null
+                  val m = p[1].toIntOrNull() ?: return null
+                  if (h !in 0..23 || m !in 0..59) return null
+                  return h * 60 + m
+              }
+          }
+          EOF
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('DhikriAndroid/app/src/main/java/com/medhat/dhikri/ReminderScheduler.kt')
+          s = p.read_text()
+          s = s.replace('''        if (prefs.getBoolean("interval_on", false)) {
+                      val minutes = prefs.getInt("interval_minutes", 30).coerceIn(1, 1440)
+                      val dhikrId = prefs.getString("interval_dhikr", "salawat") ?: "salawat"
+                      schedule(context, am, INTERVAL_ID, System.currentTimeMillis() + minutes * 60_000L, dhikrId)
+                  }''','''        scheduleSleepBoundary(context, am)
+                  if (SleepModeManager.isSleeping(context)) return
+
+                  if (prefs.getBoolean("interval_on", false)) {
+                      val minutes = prefs.getInt("interval_minutes", 30).coerceIn(1, 1440)
+                      val dhikrId = prefs.getString("interval_dhikr", "salawat") ?: "salawat"
+                      val next = System.currentTimeMillis() + minutes * 60_000L
+                      if (!SleepModeManager.isSleeping(context, next)) schedule(context, am, INTERVAL_ID, next, dhikrId)
+                  }''')
+          s = s.replace('''                schedule(context, am, DAILY_BASE + index, cal.timeInMillis, parts[1])''','''                while (SleepModeManager.isSleeping(context, cal.timeInMillis)) cal.add(Calendar.DAY_OF_YEAR, 1)
+                          schedule(context, am, DAILY_BASE + index, cal.timeInMillis, parts[1])''')
+          s = s.replace('''        if (!prefs.getBoolean("interval_on", false)) return
+                  val minutes = prefs.getInt("interval_minutes", 30).coerceIn(1, 1440)
+                  val dhikrId = prefs.getString("interval_dhikr", "salawat") ?: "salawat"
+                  val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                  schedule(context, am, INTERVAL_ID, System.currentTimeMillis() + minutes * 60_000L, dhikrId)''','''        if (!prefs.getBoolean("interval_on", false) || SleepModeManager.isSleeping(context)) return
+                  val minutes = prefs.getInt("interval_minutes", 30).coerceIn(1, 1440)
+                  val dhikrId = prefs.getString("interval_dhikr", "salawat") ?: "salawat"
+                  val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                  val next = System.currentTimeMillis() + minutes * 60_000L
+                  if (!SleepModeManager.isSleeping(context, next)) schedule(context, am, INTERVAL_ID, next, dhikrId)''')
+          s = s.replace('''        schedule(context, am, requestId, cal.timeInMillis, parts[1])''','''        while (SleepModeManager.isSleeping(context, cal.timeInMillis)) cal.add(Calendar.DAY_OF_YEAR, 1)
+                  schedule(context, am, requestId, cal.timeInMillis, parts[1])''')
+          s = s.replace('''    private fun schedule(context: Context, am: AlarmManager, id: Int, at: Long, dhikrId: String) {''','''    private fun scheduleSleepBoundary(context: Context, am: AlarmManager) {
+                  val boundary = SleepModeManager.nextBoundary(context) ?: return
+                  val intent = Intent(context, ReminderReceiver::class.java).putExtra("request_id", 7102)
+                  val pi = PendingIntent.getBroadcast(context, 7102, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                  if (android.os.Build.VERSION.SDK_INT >= 23) am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, boundary, pi)
+                  else am.setExact(AlarmManager.RTC_WAKEUP, boundary, pi)
+              }
+
+              private fun schedule(context: Context, am: AlarmManager, id: Int, at: Long, dhikrId: String) {''')
+          s = s.replace('''(listOf(INTERVAL_ID) + (DAILY_BASE..DAILY_BASE + 99).toList()).forEach''','''(listOf(INTERVAL_ID, 7102) + (DAILY_BASE..DAILY_BASE + 99).toList()).forEach''')
+          if 'scheduleSleepBoundary(context, am)' not in s or '7102' not in s:
+              raise SystemExit('Sleep scheduler patch did not apply')
+          p.write_text(s)
+
+          p = Path('DhikriAndroid/app/src/main/java/com/medhat/dhikri/ReminderReceiver.kt')
+          s = p.read_text()
+          s = s.replace('''        val requestId = intent.getIntExtra("request_id", -1)''','''        val requestId = intent.getIntExtra("request_id", -1)
+                  if (requestId == 7102) {
+                      ReminderScheduler.scheduleAll(context)
+                      return
+                  }
+                  if (SleepModeManager.isSleeping(context)) {
+                      ReminderScheduler.scheduleAll(context)
+                      return
+                  }''')
+          p.write_text(s)
+
+          p = Path('DhikriAndroid/app/src/main/java/com/medhat/dhikri/MainActivity.kt')
+          s = p.read_text()
+          s = s.replace('''    private lateinit var dailySwitch: Switch''','''    private lateinit var dailySwitch: Switch
+                  private lateinit var sleepSwitch: Switch
+                  private lateinit var sleepStartButton: Button
+                  private lateinit var sleepEndButton: Button
+                  private var sleepStartValue = "23:00"
+                  private var sleepEndValue = "07:00"''')
+          s = s.replace('''        section("مكتبة التسجيلات الصوتية")''','''        section("وضع النوم والتشغيل التلقائي")
+                  sleepSwitch = Switch(this).apply {
+                      text = "إيقاف كل التذكيرات أثناء النوم"; textSize = 17f
+                      isChecked = prefs.getBoolean("sleep_enabled", false)
+                  }
+                  sleepStartValue = prefs.getString("sleep_start", "23:00") ?: "23:00"
+                  sleepEndValue = prefs.getString("sleep_end", "07:00") ?: "07:00"
+                  page.addView(sleepSwitch, matchWrap())
+                  sleepStartButton = Button(this).apply {
+                      text = "وقت بدء النوم: $sleepStartValue"
+                      setOnClickListener { chooseSleepTime(true) }
+                  }
+                  page.addView(sleepStartButton, matchWrap())
+                  sleepEndButton = Button(this).apply {
+                      text = "وقت الاستيقاظ: $sleepEndValue"
+                      setOnClickListener { chooseSleepTime(false) }
+                  }
+                  page.addView(sleepEndButton, matchWrap())
+                  page.addView(label("أثناء النوم يتوقف الصوت والإشعارات. التذكيرات التي يفوت موعدها لا تعمل متأخرة، وتعود المواعيد القادمة تلقائيًا عند الاستيقاظ."), matchWrap())
+
+                  section("مكتبة التسجيلات الصوتية")''')
+          s = s.replace('''            .putString("daily_schedules", schedules.joinToString(";"))
+                      .apply()''','''            .putString("daily_schedules", schedules.joinToString(";"))
+                      .putBoolean("sleep_enabled", sleepSwitch.isChecked)
+                      .putString("sleep_start", sleepStartValue)
+                      .putString("sleep_end", sleepEndValue)
+                      .apply()''')
+          s = s.replace('''        ReminderScheduler.scheduleAll(this)
+                  refreshStatus()''','''        ReminderScheduler.scheduleAll(this)
+                  refreshStatus()''')
+          s = s.replace('''    private fun playDhikr(id: String) {''','''    private fun chooseSleepTime(isStart: Boolean) {
+                  val current = if (isStart) sleepStartValue else sleepEndValue
+                  val parts = current.split(":")
+                  val hour = parts.getOrNull(0)?.toIntOrNull() ?: if (isStart) 23 else 7
+                  val minute = parts.getOrNull(1)?.toIntOrNull() ?: 0
+                  TimePickerDialog(this, { _, h, m ->
+                      val value = String.format(Locale.US, "%02d:%02d", h, m)
+                      if (isStart) {
+                          sleepStartValue = value
+                          sleepStartButton.text = "وقت بدء النوم: $value"
+                      } else {
+                          sleepEndValue = value
+                          sleepEndButton.text = "وقت الاستيقاظ: $value"
+                      }
+                  }, hour, minute, true).show()
+              }
+
+              private fun playDhikr(id: String) {''')
+          if 'chooseSleepTime' not in s or 'sleep_enabled' not in s:
+              raise SystemExit('Sleep settings UI patch did not apply')
+          p.write_text(s)
+          PY
+
+          echo 'Sleep mode source changes applied.'
+          sed -n '1,260p' DhikriAndroid/app/src/main/java/com/medhat/dhikri/ReminderScheduler.kt
+          sed -n '1,140p' DhikriAndroid/app/src/main/java/com/medhat/dhikri/ReminderReceiver.kt
+
       - name: Inspect source and scheduling implementation
         shell: bash
         run: |
