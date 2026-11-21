@@ -77,6 +77,16 @@ jobs:
           print(f'Installed complete logo image {image.size}; generated all launcher densities.')
           PY
 
+      - name: Audit Android permissions and SDK configuration
+        shell: bash
+        run: |
+          echo '===== AndroidManifest.xml ====='
+          cat DhikriAndroid/app/src/main/AndroidManifest.xml
+          echo '===== Gradle SDK and dependencies ====='
+          grep -RInE 'compileSdk|targetSdk|minSdk|android.permission|uses-permission|FOREGROUND_SERVICE|SCHEDULE_EXACT_ALARM|POST_NOTIFICATIONS|RECEIVE_BOOT_COMPLETED' DhikriAndroid/app/src/main DhikriAndroid/*.gradle* DhikriAndroid/app/*.gradle* || true
+          echo '===== Manifest permission declarations ====='
+          grep -nE 'uses-permission|uses-feature|service|receiver|foregroundServiceType' DhikriAndroid/app/src/main/AndroidManifest.xml || true
+
       - name: Add notification playback controls
         shell: bash
         run: |
