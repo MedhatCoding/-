@@ -118,7 +118,10 @@ jobs:
                       val dhikrId = prefs.getString("interval_dhikr", "salawat") ?: "salawat"
                       schedule(context, am, INTERVAL_ID, System.currentTimeMillis() + minutes * 60_000L, dhikrId)
                   }''','''        scheduleSleepBoundary(context, am)
-                  if (SleepModeManager.isSleeping(context)) return
+                  if (SleepModeManager.isSleeping(context)) {
+                      context.stopService(Intent(context, AudioReminderService::class.java))
+                      return
+                  }
 
                   if (prefs.getBoolean("interval_on", false)) {
                       val minutes = prefs.getInt("interval_minutes", 30).coerceIn(1, 1440)
