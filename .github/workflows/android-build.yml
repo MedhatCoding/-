@@ -69,10 +69,10 @@ jobs:
           if re.search(r'android:icon="@[^" ]+"', text):
               text = re.sub(r'android:icon="@[^" ]+"', 'android:icon="@mipmap/dhikri_logo"', text, count=1)
           else:
-              text, count = re.subn(r'<application\\b', '<application android:icon="@mipmap/dhikri_logo"', text, count=1)
+              text, count = re.subn(r'<application\b', '<application android:icon="@mipmap/dhikri_logo"', text, count=1)
               if count != 1:
                   raise SystemExit('Could not locate application tag in AndroidManifest.xml')
-          text = re.sub(r'\\s+android:roundIcon="@[^" ]+"', '', text)
+          text = re.sub(r'\s+android:roundIcon="@[^" ]+"', '', text)
           manifest.write_text(text, encoding='utf-8')
           print(f'Installed complete logo image {image.size}; generated all launcher densities.')
           PY
