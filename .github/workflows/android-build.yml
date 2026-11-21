@@ -285,7 +285,7 @@ jobs:
                           input.error = "أدخل مدة من 1 إلى 1440 دقيقة"; return
                       }
                       val spinner = row.getChildAt(1) as Spinner
-                      intervalSchedules.add("$minutes|\${spinnerDhikrId(spinner)}")
+                      intervalSchedules.add("$minutes|${spinnerDhikrId(spinner)}")
                   }
                   if (intervalSwitch.isChecked && intervalSchedules.isEmpty()) {
                       Toast.makeText(this, "أضف تذكيرًا دوريًا واحدًا على الأقل", Toast.LENGTH_SHORT).show(); return
@@ -658,6 +658,43 @@ jobs:
         run: |
           cd DhikriAndroid
           gradle --no-daemon assembleDebug
+
+      - name: Launch APK on Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          script: |
+            set -euxo pipefail
+            APK="DhikriAndroid/app/build/outputs/apk/debug/app-debug.apk"
+            adb install -r "$APK"
+            adb logcat -c
+            adb shell monkey -p com.medhat.dhikri 1
+            sleep 15
+            adb shell screencap -p /sdcard/dhikri-launch.png
+            adb pull /sdcard/dhikri-launch.png Dhikri-launch-screen.png
+            adb logcat -d -t 5000 > Dhikri-launch-logcat.txt
+            if ! adb shell pidof com.medhat.dhikri; then
+              echo "Dhikri process is not running after launch"
+              grep -E -i "FATAL EXCEPTION|AndroidRuntime|Process: com.medhat.dhikri" Dhikri-launch-logcat.txt || true
+              exit 1
+            fi
+            if grep -E -q "FATAL EXCEPTION.*|Process: com.medhat.dhikri.*died" Dhikri-launch-logcat.txt; then
+              echo "Fatal app error detected during launch"
+              exit 1
+            fi
+
+      - name: Upload emulator launch diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Dhikri-emulator-launch-diagnostics
+          path: |
+            Dhikri-launch-screen.png
+            Dhikri-launch-logcat.txt
+          if-no-files-found: ignore
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
