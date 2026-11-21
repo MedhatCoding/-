@@ -2,9 +2,10 @@ name: Build Dhikri Android APK
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
     paths:
-      - "source/**"
+      - 'source/**'
   workflow_dispatch:
 
 permissions:
@@ -13,9 +14,6 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      ANDROID_HOME: /usr/local/lib/android/sdk
-      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -24,20 +22,25 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
 
       - name: Accept Android SDK licenses
-        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses
 
       - name: Install Android SDK packages
-        run: "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
+        shell: bash
+        run: |
+          sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
 
       - name: Set up Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "8.9"
+          gradle-version: '8.9'
 
       - name: Restore Android source archive
+        shell: bash
         run: |
           cat source/part-1.b64 source/part-2.b64 source/part-3.b64 source/part-4.b64 > /tmp/dhikri-source.zip.b64
           base64 --decode /tmp/dhikri-source.zip.b64 > /tmp/dhikri-source.zip
@@ -47,6 +50,7 @@ jobs:
           grep -F 'Regex("""([01]\\d|2[0-3]):[0-5]\\d""")' DhikriAndroid/app/src/main/java/com/medhat/dhikri/MainActivity.kt
 
       - name: Build debug APK
+        shell: bash
         run: |
           cd DhikriAndroid
           gradle --no-daemon assembleDebug
